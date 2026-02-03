@@ -50,24 +50,38 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
+          # Guardar el workspace root
+          WORKSPACE_ROOT=$(pwd)
+          
+          # Convertir archivos cambiados a rutas absolutas
+          FILES="${{ steps.changed-files.outputs.all_changed_files }}"
+          ABSOLUTE_FILES=""
+          for file in $FILES; do
+            ABSOLUTE_FILES="$ABSOLUTE_FILES $WORKSPACE_ROOT/$file"
+          done
+          
           cd security_ml
           
           # Verificar si hay modelo entrenado
           if [ ! -f "model.joblib" ]; then
-            echo "⚠️ No se encontró modelo entrenado. Ejecutando notebook de entrenamiento..."
-            pip install jupyter nbconvert
-            jupyter nbconvert --to script train_model.ipynb
-            python train_model.py || echo "Usando modelo pre-entrenado"
+            echo "⚠️ No se encontró modelo entrenado. Ejecutando entrenamiento..."
+            python train_model.py || echo "Error en entrenamiento"
           fi
           
-          # Ejecutar análisis
-          python analyze_pr.py \
+          # Construir comando con argumentos opcionales
+          CMD="python analyze_pr.py \
             --pr-number ${{ github.event.pull_request.number }} \
             --repo ${{ github.repository }} \
             --github-token ${{ secrets.GITHUB_TOKEN }} \
-            --telegram-token ${{ secrets.TELEGRAM_BOT_TOKEN }} \
-            --telegram-chat-id ${{ secrets.TELEGRAM_CHAT_ID }} \
-            --files ${{ steps.changed-files.outputs.all_changed_files }}
+            --files $ABSOLUTE_FILES"
+          
+          # Agregar Telegram solo si está configurado
+          if [ -n "$TELEGRAM_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+            CMD="$CMD --telegram-token $TELEGRAM_TOKEN --telegram-chat-id $TELEGRAM_CHAT_ID"
+          fi
+          
+          # Ejecutar análisis
+          eval $CMD
 
       - name: 📊 Generate security report
         if: always()
