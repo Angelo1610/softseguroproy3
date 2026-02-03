@@ -16,7 +16,7 @@ if (-not (Test-Path "security_ml")) {
 }
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$branchName = "test/secure-code-$timestamp"
+$branchName = "feature/secure-code-$timestamp"
 
 # ================================================================================
 # PASO 1: Checkout a dev
@@ -115,7 +115,7 @@ export class TestSecureController {
         
         // Búsqueda segura
         const results = await User.find({
-            name: { \$regex: sanitizedQuery, \$options: 'i' }
+            name: { `$regex: sanitizedQuery, `$options: 'i' }
         }).select('-password');
         
         res.json({ 

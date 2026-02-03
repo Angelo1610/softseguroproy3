@@ -27,8 +27,8 @@ Write-Host "[OK] En rama dev" -ForegroundColor Green
 # ================================================================================
 Write-Host "`n[2/4] Buscando branches de prueba..." -ForegroundColor Yellow
 
-$localBranches = git branch | Select-String "test/secure-code" | ForEach-Object { $_.ToString().Trim() -replace '^\* ', '' }
-$localBranches += git branch | Select-String "test/vulnerable-code" | ForEach-Object { $_.ToString().Trim() -replace '^\* ', '' }
+$localBranches = git branch | Select-String "feature/secure-code" | ForEach-Object { $_.ToString().Trim() -replace '^\* ', '' }
+$localBranches += git branch | Select-String "feature/vulnerable-code" | ForEach-Object { $_.ToString().Trim() -replace '^\* ', '' }
 $localBranches = $localBranches | Where-Object { $_ -ne "" }
 
 if ($localBranches.Count -eq 0) {
@@ -75,8 +75,8 @@ if (-not $?) {
     # Actualizar referencias remotas
     git fetch --prune 2>&1 | Out-Null
     
-    $remoteBranches = git branch -r | Select-String "origin/test/secure-code" | ForEach-Object { $_.ToString().Trim() -replace 'origin/', '' }
-    $remoteBranches += git branch -r | Select-String "origin/test/vulnerable-code" | ForEach-Object { $_.ToString().Trim() -replace 'origin/', '' }
+    $remoteBranches = git branch -r | Select-String "origin/feature/secure-code" | ForEach-Object { $_.ToString().Trim() -replace 'origin/', '' }
+    $remoteBranches += git branch -r | Select-String "origin/feature/vulnerable-code" | ForEach-Object { $_.ToString().Trim() -replace 'origin/', '' }
     $remoteBranches = $remoteBranches | Where-Object { $_ -ne "" }
     
     if ($remoteBranches.Count -eq 0) {

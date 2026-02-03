@@ -54,20 +54,24 @@ jobs:
           
           # Verificar si hay modelo entrenado
           if [ ! -f "model.joblib" ]; then
-            echo "⚠️ No se encontró modelo entrenado. Ejecutando notebook de entrenamiento..."
-            pip install jupyter nbconvert
-            jupyter nbconvert --to script train_model.ipynb
+            echo "⚠️ No se encontró modelo entrenado. Ejecutando entrenamiento..."
             python train_model.py || echo "Usando modelo pre-entrenado"
           fi
           
-          # Ejecutar análisis
-          python analyze_pr.py \
+          # Construir comando con argumentos opcionales
+          CMD="python analyze_pr.py \
             --pr-number ${{ github.event.pull_request.number }} \
             --repo ${{ github.repository }} \
             --github-token ${{ secrets.GITHUB_TOKEN }} \
-            --telegram-token ${{ secrets.TELEGRAM_BOT_TOKEN }} \
-            --telegram-chat-id ${{ secrets.TELEGRAM_CHAT_ID }} \
-            --files ${{ steps.changed-files.outputs.all_changed_files }}
+            --files ${{ steps.changed-files.outputs.all_changed_files }}"
+          
+          # Agregar Telegram solo si está configurado
+          if [ -n "$TELEGRAM_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+            CMD="$CMD --telegram-token $TELEGRAM_TOKEN --telegram-chat-id $TELEGRAM_CHAT_ID"
+          fi
+          
+          # Ejecutar análisis
+          eval $CMD
 
       - name: 📊 Generate security report
         if: always()
