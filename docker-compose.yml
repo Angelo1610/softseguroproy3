@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  # MongoDB
+  mongodb:
+    image: mongo:6
+    container_name: biometric-auth-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+      MONGO_INITDB_DATABASE: biometric_auth_db
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - biometric-network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: biometric-auth-backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://admin:password123@mongodb:27017/biometric_auth_db?authSource=admin
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      RP_ID: ${RP_ID}
+      EXPECTED_ORIGIN: ${EXPECTED_ORIGIN}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+    depends_on:
+      - mongodb
+    networks:
+      - biometric-network
+    volumes:
+      - ./backend/logs:/app/logs
+
+  # Frontend (React)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: biometric-auth-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - biometric-network
+
+networks:
+  biometric-network:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+    driver: local

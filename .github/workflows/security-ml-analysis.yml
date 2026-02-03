@@ -1,0 +1,92 @@
+name: Security ML Vulnerability Analysis
+
+on:
+  pull_request:
+    branches:
+      - test
+    paths:
+      - 'backend/**/*.ts'
+      - 'backend/**/*.js'
+
+jobs:
+  security-analysis:
+    name: ML Vulnerability Detection
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 📦 Install Python dependencies
+        run: |
+          cd security_ml
+          pip install -r requirements.txt
+
+      - name: 🔍 Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v40
+        with:
+          files: |
+            backend/**/*.ts
+            backend/**/*.js
+
+      - name: 🚀 Run ML vulnerability analysis
+        id: analysis
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          cd security_ml
+          
+          # Verificar si hay modelo entrenado
+          if [ ! -f "model.joblib" ]; then
+            echo "⚠️ No se encontró modelo entrenado. Ejecutando notebook de entrenamiento..."
+            pip install jupyter nbconvert
+            jupyter nbconvert --to script train_model.ipynb
+            python train_model.py || echo "Usando modelo pre-entrenado"
+          fi
+          
+          # Ejecutar análisis
+          python analyze_pr.py \
+            --pr-number ${{ github.event.pull_request.number }} \
+            --repo ${{ github.repository }} \
+            --github-token ${{ secrets.GITHUB_TOKEN }} \
+            --telegram-token ${{ secrets.TELEGRAM_BOT_TOKEN }} \
+            --telegram-chat-id ${{ secrets.TELEGRAM_CHAT_ID }} \
+            --files ${{ steps.changed-files.outputs.all_changed_files }}
+
+      - name: 📊 Generate security report
+        if: always()
+        run: |
+          echo "## 🔒 Security Analysis Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**PR Number**: #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch**: ${{ github.head_ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Analysis completed. Check PR comments for details." >> $GITHUB_STEP_SUMMARY
+
+      - name: ❌ Fail if vulnerabilities detected
+        if: failure()
+        run: |
+          echo "::error::Vulnerabilities detected! Please review the security report and fix the issues before merging."
+          exit 1
+
+      - name: ✅ Success notification
+        if: success()
+        run: |
+          echo "✅ Security analysis passed! No vulnerabilities detected."

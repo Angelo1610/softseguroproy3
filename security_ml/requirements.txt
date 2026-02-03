@@ -1,0 +1,23 @@
+# Machine Learning y análisis de datos
+scikit-learn==1.4.0
+pandas==2.2.0
+numpy==1.26.3
+joblib==1.3.2
+xgboost==2.0.3
+
+# Análisis de código
+esprima==4.0.1
+pathlib==1.0.1
+
+# Utilidades
+python-dotenv==1.0.1
+requests==2.31.0
+PyGithub==2.1.1
+
+# Visualización (para notebook)
+matplotlib==3.8.2
+seaborn==0.13.1
+
+# Notebook
+jupyter==1.0.0
+ipykernel==6.29.0
