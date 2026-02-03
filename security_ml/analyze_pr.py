@@ -97,28 +97,55 @@ class VulnerabilityAnalyzer:
         # Extraer características
         features = extract_features_simple(code)
         
-        # Convertir a DataFrame
-        features_df = pd.DataFrame([features])
+        # REGLA HEURÍSTICA: Detectar patrones críticos automáticamente
+        # Si hay uso de funciones peligrosas CON entrada del usuario sin validación -> VULNERABLE
+        critical_vulnerability = False
+        critical_reason = ""
         
-        # Asegurar que tenemos todas las columnas
-        for col in self.feature_names:
-            if col not in features_df.columns:
-                features_df[col] = 0
+        if features['exec_calls'] > 0 and features['req_body'] > 0 and features['validation_calls'] == 0:
+            critical_vulnerability = True
+            critical_reason = "Command Injection: exec() con req.body sin validación"
+        elif features['eval_calls'] > 0 and (features['req_body'] > 0 or features['req_query'] > 0) and features['validation_calls'] == 0:
+            critical_vulnerability = True
+            critical_reason = "Code Injection: eval() con entrada de usuario sin validación"
+        elif (features['exec_calls'] > 0 or features['spawn_calls'] > 0) and features['validation_calls'] == 0:
+            critical_vulnerability = True
+            critical_reason = "Command Injection: ejecución de comandos sin validación"
+        elif features['db_where'] > 0:
+            critical_vulnerability = True
+            critical_reason = "NoSQL Injection: uso de $where en MongoDB"
+        elif (features['req_body'] > 2 or features['req_query'] > 1) and features['validation_calls'] == 0 and features['has_sanitize'] == 0:
+            # Uso extensivo de entrada del usuario sin ninguna protección
+            critical_vulnerability = True
+            critical_reason = "Validación Insuficiente: múltiples usos de req.body/req.query sin validación ni sanitización"
         
-        features_df = features_df[self.feature_names]
-        
-        # Escalar
-        features_scaled = self.scaler.transform(features_df)
-        
-        # Predecir
-        prediction = self.model.predict(features_scaled)[0]
-        probabilities = self.model.predict_proba(features_scaled)[0]
-        
-        result = "VULNERABLE" if prediction == 1 else "SEGURO"
-        confidence = probabilities[prediction] * 100
-        
-        # Detectar tipo de vulnerabilidad
-        vulnerability_type = self._detect_vulnerability_type(features, prediction)
+        # Si se detectó vulnerabilidad crítica, marcar como VULNERABLE directamente
+        if critical_vulnerability:
+            result = "VULNERABLE"
+            confidence = 95.0  # Alta confianza en reglas heurísticas
+            probabilities = [0.05, 0.95]  # [SEGURO, VULNERABLE]
+            vulnerability_type = critical_reason.split(':')[0]
+        else:
+            # Convertir a DataFrame
+            features_df = pd.DataFrame([features])
+            
+            # Asegurar que tenemos todas las columnas
+            for col in self.feature_names:
+                if col not in features_df.columns:
+                    features_df[col] = 0
+            
+            features_df = features_df[self.feature_names]
+            
+            # Escalar
+            features_scaled = self.scaler.transform(features_df)
+            
+            # Predecir
+            prediction = self.model.predict(features_scaled)[0]
+            probabilities = self.model.predict_proba(features_scaled)[0]
+            
+            result = "VULNERABLE" if prediction == 1 else "SEGURO"
+            confidence = probabilities[prediction] * 100
+            vulnerability_type = self._detect_vulnerability_type(features, prediction)
         
         # Detectar patrones específicos
         patterns_detected = self._detect_patterns(code, features)

@@ -16,7 +16,7 @@ if (-not (Test-Path "security_ml")) {
 }
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$branchName = "test/vulnerable-code-$timestamp"
+$branchName = "feature/vulnerable-code-$timestamp"
 
 # ================================================================================
 # PASO 1: Checkout a dev
