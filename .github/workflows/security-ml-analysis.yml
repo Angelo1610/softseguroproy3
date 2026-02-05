@@ -4,9 +4,12 @@ on:
   pull_request:
     branches:
       - test
+      - main
     paths:
       - 'backend/**/*.ts'
       - 'backend/**/*.js'
+      - 'frontend/**/*.ts'
+      - 'frontend/**/*.tsx'
 
 jobs:
   security-analysis:
@@ -17,76 +20,191 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
+      statuses: write
 
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: 🐍 Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
+          cache-dependency-path: 'security_ml/requirements.txt'
 
       - name: 📦 Install Python dependencies
         run: |
+          python -m pip install --upgrade pip wheel setuptools
           cd security_ml
           pip install -r requirements.txt
+          python -c "import sklearn; import pandas; import joblib; print('✅ Dependencias instaladas')"
 
       - name: 🔍 Get changed files
         id: changed-files
-        uses: tj-actions/changed-files@v40
+        uses: tj-actions/changed-files@v41
         with:
           files: |
             backend/**/*.ts
             backend/**/*.js
+            frontend/**/*.ts
+            frontend/**/*.tsx
+
+      - name: ✅ Verify changed files
+        id: verify-files
+        run: |
+          FILES="${{ steps.changed-files.outputs.all_changed_files }}"
+          
+          if [ -z "$FILES" ]; then
+            echo "⚠️  No hay archivos TypeScript/JavaScript modificados"
+            echo "skip_analysis=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "📂 Archivos a analizar:"
+          for file in $FILES; do
+            echo "  - $file"
+          done
+          
+          echo "skip_analysis=false" >> $GITHUB_OUTPUT
+          echo "file_count=$(echo $FILES | wc -w)" >> $GITHUB_OUTPUT
+
+      - name: 🔧 Verify ML model
+        if: steps.verify-files.outputs.skip_analysis != 'true'
+        run: |
+          cd security_ml
+          
+          if [ ! -f "model.joblib" ]; then
+            echo "⚠️  No se encontró modelo entrenado"
+            echo "🔄 Entrenando modelo..."
+            
+            if python train_model.py; then
+              echo "✅ Modelo entrenado exitosamente"
+            else
+              echo "❌ Error al entrenar modelo"
+              exit 1
+            fi
+          else
+            echo "✅ Modelo encontrado"
+            
+            # Verificar archivos necesarios
+            for file in model.joblib scaler.joblib feature_names.joblib; do
+              if [ ! -f "$file" ]; then
+                echo "❌ Falta archivo: $file"
+                exit 1
+              fi
+            done
+            
+            echo "✅ Todos los archivos del modelo presentes"
+          fi
 
       - name: 🚀 Run ML vulnerability analysis
+        if: steps.verify-files.outputs.skip_analysis != 'true'
         id: analysis
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          cd security_ml
+          set -e  # Fallar si cualquier comando falla
           
-          # Verificar si hay modelo entrenado
-          if [ ! -f "model.joblib" ]; then
-            echo "⚠️ No se encontró modelo entrenado. Ejecutando notebook de entrenamiento..."
-            pip install jupyter nbconvert
-            jupyter nbconvert --to script train_model.ipynb
-            python train_model.py || echo "Usando modelo pre-entrenado"
+          # Guardar workspace root
+          WORKSPACE_ROOT=$(pwd)
+          echo "📁 Workspace: $WORKSPACE_ROOT"
+          
+          # Obtener archivos modificados
+          FILES="${{ steps.changed-files.outputs.all_changed_files }}"
+          
+          # Convertir a rutas absolutas
+          ABSOLUTE_FILES=""
+          for file in $FILES; do
+            if [ -f "$WORKSPACE_ROOT/$file" ]; then
+              ABSOLUTE_FILES="$ABSOLUTE_FILES $WORKSPACE_ROOT/$file"
+              echo "  ✓ $file"
+            else
+              echo "  ⚠️  Archivo no encontrado: $file"
+            fi
+          done
+          
+          if [ -z "$ABSOLUTE_FILES" ]; then
+            echo "❌ No se encontraron archivos válidos para analizar"
+            exit 1
           fi
           
-          # Ejecutar análisis
-          python analyze_pr.py \
+          # Cambiar al directorio de análisis
+          cd security_ml
+          
+          # Construir comando base
+          CMD="python analyze_pr.py \
             --pr-number ${{ github.event.pull_request.number }} \
             --repo ${{ github.repository }} \
             --github-token ${{ secrets.GITHUB_TOKEN }} \
-            --telegram-token ${{ secrets.TELEGRAM_BOT_TOKEN }} \
-            --telegram-chat-id ${{ secrets.TELEGRAM_CHAT_ID }} \
-            --files ${{ steps.changed-files.outputs.all_changed_files }}
+            --files $ABSOLUTE_FILES"
+          
+          # Agregar Telegram solo si está configurado
+          if [ -n "$TELEGRAM_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+            echo "📱 Notificaciones de Telegram habilitadas"
+            CMD="$CMD --telegram-token $TELEGRAM_TOKEN --telegram-chat-id $TELEGRAM_CHAT_ID"
+          fi
+          
+          # Ejecutar análisis
+          echo ""
+          echo "🔍 Ejecutando análisis..."
+          echo ""
+          
+          if eval $CMD; then
+            echo "analysis_result=success" >> $GITHUB_OUTPUT
+            exit 0
+          else
+            echo "analysis_result=vulnerabilities_found" >> $GITHUB_OUTPUT
+            exit 1
+          fi
 
       - name: 📊 Generate security report
-        if: always()
+        if: always() && steps.verify-files.outputs.skip_analysis != 'true'
         run: |
           echo "## 🔒 Security Analysis Report" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**PR Number**: #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Branch**: ${{ github.head_ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch**: \`${{ github.head_ref }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Base**: \`${{ github.base_ref }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Files analyzed**: ${{ steps.verify-files.outputs.file_count }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Analysis completed. Check PR comments for details." >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.analysis.outputs.analysis_result }}" = "success" ]; then
+            echo "### ✅ Analysis Status: PASSED" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "No vulnerabilities detected. Safe to merge! 🎉" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.analysis.outputs.analysis_result }}" = "vulnerabilities_found" ]; then
+            echo "### ❌ Analysis Status: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️  **Vulnerabilities detected!** Please review the PR comments and fix the issues before merging." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ℹ️ Analysis Status: SKIPPED" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "No relevant files changed or analysis was skipped." >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "*Powered by ML Security Scanner*" >> $GITHUB_STEP_SUMMARY
 
       - name: ❌ Fail if vulnerabilities detected
-        if: failure()
+        if: steps.analysis.outputs.analysis_result == 'vulnerabilities_found'
         run: |
-          echo "::error::Vulnerabilities detected! Please review the security report and fix the issues before merging."
+          echo "::error title=Security Vulnerabilities Detected::Vulnerabilities were found in the code. Please review and fix them before merging."
           exit 1
 
-      - name: ✅ Success notification
-        if: success()
+      - name: ℹ️ Skip notification
+        if: steps.verify-files.outputs.skip_analysis == 'true'
         run: |
-          echo "✅ Security analysis passed! No vulnerabilities detected."
+          echo "::notice::No TypeScript/JavaScript files were modified in this PR. Skipping security analysis."
+
+      - name: ✅ Success notification
+        if: steps.analysis.outputs.analysis_result == 'success'
+        run: |
+          echo "::notice title=Security Analysis Passed::✅ All files analyzed are secure. No vulnerabilities detected!"
